@@ -98,7 +98,7 @@ lookup_power_well(struct drm_i915_private *i915,
 void intel_power_well_enable(struct drm_i915_private *i915,
 			     struct i915_power_well *power_well)
 {
-	drm_dbg_kms(&i915->drm, "enabling %s\n", intel_power_well_name(power_well));
+	//drm_dbg_kms(&i915->drm, "enabling %s\n", intel_power_well_name(power_well));
 	power_well->desc->ops->enable(i915, power_well);
 	power_well->hw_enabled = true;
 }
@@ -106,7 +106,7 @@ void intel_power_well_enable(struct drm_i915_private *i915,
 void intel_power_well_disable(struct drm_i915_private *i915,
 			      struct i915_power_well *power_well)
 {
-	drm_dbg_kms(&i915->drm, "disabling %s\n", intel_power_well_name(power_well));
+	//drm_dbg_kms(&i915->drm, "disabling %s\n", intel_power_well_name(power_well));
 	power_well->hw_enabled = false;
 	power_well->desc->ops->disable(i915, power_well);
 }
@@ -763,8 +763,8 @@ void gen9_set_dc_state(struct intel_display *display, u32 state)
 
 	val = intel_de_read(display, DC_STATE_EN);
 	mask = gen9_dc_mask(display);
-	drm_dbg_kms(display->drm, "Setting DC state from %02x to %02x\n",
-		    val & mask, state);
+	//drm_dbg_kms(display->drm, "Setting DC state from %02x to %02x\n",
+	//	    val & mask, state);
 
 	/* Check if DMC is ignoring our DC state requests */
 	if ((val & mask) != power_domains->dc_state)
@@ -826,7 +826,7 @@ void gen9_enable_dc5(struct intel_display *display)
 
 	assert_can_enable_dc5(display);
 
-	drm_dbg_kms(display->drm, "Enabling DC5\n");
+	//drm_dbg_kms(display->drm, "Enabling DC5\n");
 
 	/* Wa Display #1183: skl,kbl,cfl */
 	if (DISPLAY_VER(display) == 9 && !IS_BROXTON(dev_priv))
@@ -859,7 +859,7 @@ void skl_enable_dc6(struct intel_display *display)
 
 	assert_can_enable_dc6(display);
 
-	drm_dbg_kms(display->drm, "Enabling DC6\n");
+	//drm_dbg_kms(display->drm, "Enabling DC6\n");
 
 	/* Wa Display #1183: skl,kbl,cfl */
 	if (DISPLAY_VER(display) == 9 && !IS_BROXTON(dev_priv))

@@ -339,7 +339,7 @@ int drm_mode_addfb2(struct drm_device *dev,
 	if (IS_ERR(fb))
 		return PTR_ERR(fb);
 
-	drm_dbg_kms(dev, "[FB:%d]\n", fb->base.id);
+	/*drm_dbg_kms(dev, "[FB:%d]\n", fb->base.id);*/
 	r->fb_id = fb->base.id;
 
 	/* Transfer ownership to the filp for reaping on close */
@@ -387,9 +387,11 @@ static void drm_mode_rmfb_work_fn(struct work_struct *w)
 		struct drm_framebuffer *fb =
 			list_first_entry(&arg->fbs, typeof(*fb), filp_head);
 
+		/*
 		drm_dbg_kms(fb->dev,
 			    "Removing [FB:%d] from all active usage due to RMFB ioctl\n",
 			    fb->base.id);
+		*/
 		list_del_init(&fb->filp_head);
 		drm_framebuffer_remove(fb);
 	}
