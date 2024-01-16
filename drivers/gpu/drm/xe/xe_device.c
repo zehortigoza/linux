@@ -747,3 +747,18 @@ void xe_device_snapshot_print(struct xe_device *xe, struct drm_printer *p)
 		drm_printf(p, "\tCS reference clock: %u\n", gt->info.reference_clock);
 	}
 }
+
+static int highest_address_bit_get(struct xe_device *xe)
+{
+	return xe->info.dma_mask_size > 48 ? 57 : 47;
+}
+
+u64 xe_device_canonicalize_addr(struct xe_device *xe, u64 address)
+{
+	return sign_extend64(address, highest_address_bit_get(xe));
+}
+
+u64 xe_device_uncanonicalize_addr(struct xe_device *xe, u64 address)
+{
+	return address & GENMASK_ULL(highest_address_bit_get(xe), 0);
+}
