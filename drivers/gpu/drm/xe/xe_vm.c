@@ -13,6 +13,7 @@
 #include <drm/ttm/ttm_execbuf_util.h>
 #include <drm/ttm/ttm_tt.h>
 #include <drm/xe_drm.h>
+#include <linux/ascii85.h>
 #include <linux/delay.h>
 #include <linux/kthread.h>
 #include <linux/mm.h>
@@ -3236,4 +3237,170 @@ int xe_analyze_vm(struct drm_printer *p, struct xe_vm *vm, int gt_id)
 	up_read(&vm->lock);
 
 	return 0;
+}
+
+struct xe_vm_snapshot {
+	unsigned long num_snaps;
+	struct {
+		uint64_t ofs, bo_ofs;
+		unsigned long len;
+		struct xe_bo *bo;
+		void *data;
+		struct mm_struct *mm;
+	} snap[];
+};
+
+struct xe_vm_snapshot *xe_vm_snapshot_capture(struct xe_vm *vm)
+{
+	unsigned long num_snaps = 0, i;
+	struct xe_vm_snapshot *snap = NULL;
+	struct drm_gpuva *gpuva;
+
+	if (!vm)
+		return NULL;
+
+	mutex_lock(&vm->snap_mutex);
+	drm_gpuvm_for_each_va(gpuva, &vm->gpuvm) {
+		if (gpuva->flags & XE_VMA_DUMPABLE)
+			num_snaps++;
+	}
+
+	if (num_snaps)
+		snap = kvzalloc(offsetof(struct xe_vm_snapshot, snap[num_snaps]), GFP_NOWAIT);
+	if (!snap)
+		goto out_unlock;
+
+	snap->num_snaps = num_snaps;
+	i = 0;
+	drm_gpuvm_for_each_va(gpuva, &vm->gpuvm) {
+		struct xe_vma *vma = gpuva_to_vma(gpuva);
+		struct xe_bo *bo = vma->gpuva.gem.obj ?
+			gem_to_xe_bo(vma->gpuva.gem.obj) : NULL;
+
+		if (!(gpuva->flags & XE_VMA_DUMPABLE))
+			continue;
+
+		snap->snap[i].ofs = xe_vma_start(vma);
+		snap->snap[i].len = xe_vma_size(vma);
+		if (bo) {
+			snap->snap[i].bo = xe_bo_get(bo);
+			snap->snap[i].bo_ofs = xe_vma_bo_offset(vma);
+		} else if (xe_vma_is_userptr(vma)) {
+			if (mmget_not_zero(vma->userptr.notifier.mm))
+				snap->snap[i].mm = vma->userptr.notifier.mm;
+			else
+				snap->snap[i].data = ERR_PTR(-EFAULT);
+			snap->snap[i].bo_ofs = xe_vma_userptr(vma);
+		} else {
+			snap->snap[i].data = ERR_PTR(-ENOENT);
+		}
+		i++;
+	}
+
+out_unlock:
+	mutex_unlock(&vm->snap_mutex);
+	return snap;
+}
+
+void xe_vm_snapshot_capture_delayed(struct xe_vm_snapshot *snap)
+{
+	if (!snap)
+		return;
+
+	for (int i = 0; i < snap->num_snaps; i++) {
+		struct xe_bo *bo = snap->snap[i].bo;
+		struct iosys_map src;
+		int err;
+
+		if (IS_ERR(snap->snap[i].data))
+			continue;
+
+		snap->snap[i].data = kvmalloc(snap->snap[i].len, GFP_USER);
+		if (!snap->snap[i].data) {
+			snap->snap[i].data = ERR_PTR(-ENOMEM);
+			goto cleanup_bo;
+		}
+
+		if (bo) {
+			dma_resv_lock(bo->ttm.base.resv, NULL);
+			err = ttm_bo_vmap(&bo->ttm, &src);
+			if (!err) {
+				xe_map_memcpy_from(xe_bo_device(bo),
+						   snap->snap[i].data,
+						   &src, snap->snap[i].bo_ofs,
+						   snap->snap[i].len);
+				ttm_bo_vunmap(&bo->ttm, &src);
+			}
+			dma_resv_unlock(bo->ttm.base.resv);
+		} else {
+			void __user *userptr = (void __user *)(size_t)snap->snap[i].bo_ofs;
+			kthread_use_mm(snap->snap[i].mm);
+
+			if (!copy_from_user(snap->snap[i].data, userptr, snap->snap[i].len))
+				err = 0;
+			else
+				err = -EFAULT;
+			kthread_unuse_mm(snap->snap[i].mm);
+			mmput(snap->snap[i].mm);
+			snap->snap[i].mm = NULL;
+		}
+
+		if (err) {
+			kvfree(snap->snap[i].data);
+			snap->snap[i].data = ERR_PTR(err);
+		}
+
+cleanup_bo:
+		xe_bo_put(bo);
+		snap->snap[i].bo = NULL;
+	}
+}
+
+void xe_vm_snapshot_print(struct xe_vm_snapshot *snap, struct drm_printer *p)
+{
+	unsigned long i, j;
+
+	for (i = 0; i < snap->num_snaps; i++) {
+		if (IS_ERR(snap->snap[i].data))
+			goto uncaptured;
+
+		drm_printf(p, "[%llx].length: 0x%lx\n", snap->snap[i].ofs, snap->snap[i].len);
+
+		for (j = 0; j < snap->snap[i].len; j += 64) {
+			uint32_t *val = snap->snap[i].data + j;
+			char dumped[16][ASCII85_BUFSZ];
+			const char *x[16];
+			uint32_t k;
+
+			for (k = 0; k < 16; k++)
+				x[k] = ascii85_encode(val[k], dumped[k]);
+
+			drm_printf(p, "[%llx].data: { %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s }\n",
+				   snap->snap[i].ofs + j, x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7],
+				   x[8], x[9], x[10], x[11], x[12], x[13], x[14], x[15]);
+		}
+		continue;
+
+uncaptured:
+		drm_printf(p, "Unable to capture range [%llx-%llx]: %li\n",
+			   snap->snap[i].ofs, snap->snap[i].ofs + snap->snap[i].len - 1,
+			   PTR_ERR(snap->snap[i].data));
+	}
+}
+
+void xe_vm_snapshot_free(struct xe_vm_snapshot *snap)
+{
+	unsigned long i;
+
+	if (!snap)
+		return;
+
+	for (i = 0; i < snap->num_snaps; i++) {
+		if (!IS_ERR(snap->snap[i].data))
+			kvfree(snap->snap[i].data);
+		xe_bo_put(snap->snap[i].bo);
+		if (snap->snap[i].mm)
+			mmput(snap->snap[i].mm);
+	}
+	kvfree(snap);
 }
