@@ -3369,19 +3369,16 @@ void xe_vm_snapshot_print(struct xe_vm_snapshot *snap, struct drm_printer *p)
 			continue;
 		}
 
-		for (j = 0; j < snap->snap[i].len; j += 64) {
+		drm_printf(p, "[%llx].data: ", snap->snap[i].ofs);
+
+		for (j = 0; j < snap->snap[i].len; j+= sizeof(u32)) {
 			uint32_t *val = snap->snap[i].data + j;
-			char dumped[16][ASCII85_BUFSZ];
-			const char *x[16];
-			uint32_t k;
+			char dumped[ASCII85_BUFSZ];
 
-			for (k = 0; k < 16; k++)
-				x[k] = ascii85_encode(val[k], dumped[k]);
-
-			drm_printf(p, "[%llx].data: { %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s }\n",
-				   snap->snap[i].ofs + j, x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7],
-				   x[8], x[9], x[10], x[11], x[12], x[13], x[14], x[15]);
+			drm_puts(p, ascii85_encode(*val, dumped));
 		}
+
+		drm_puts(p, "\n");
 	}
 }
 
