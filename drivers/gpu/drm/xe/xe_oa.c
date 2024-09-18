@@ -903,9 +903,9 @@ static void xe_oa_stream_destroy(struct xe_oa_stream *stream)
 	if (WARN_ON(stream != u->exclusive_stream))
 		return;
 
-	WRITE_ONCE(u->exclusive_stream, NULL);
+	mutex_lock(&stream->stream_lock);
 
-	mutex_destroy(&stream->stream_lock);
+	WRITE_ONCE(u->exclusive_stream, NULL);
 
 	xe_oa_disable_metric_set(stream);
 	xe_exec_queue_put(stream->k_exec_q);
@@ -920,6 +920,8 @@ static void xe_oa_stream_destroy(struct xe_oa_stream *stream)
 		xe_gt_WARN_ON(gt, xe_guc_pc_unset_gucrc_mode(&gt->uc.guc.pc));
 
 	xe_oa_free_configs(stream);
+	mutex_unlock(&stream->stream_lock);
+	mutex_destroy(&stream->stream_lock);
 	xe_file_put(stream->xef);
 }
 
