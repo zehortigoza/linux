@@ -695,6 +695,7 @@ static int xe_oa_modify_ctx_image(struct xe_oa_stream *stream, struct xe_lrc *lr
 	struct dma_fence *fence;
 	struct xe_bb *bb;
 	int err;
+	long timeout;
 
 	bb = xe_bb_new(stream->gt, 4 * count, false);
 	if (IS_ERR(bb)) {
@@ -709,8 +710,16 @@ static int xe_oa_modify_ctx_image(struct xe_oa_stream *stream, struct xe_lrc *lr
 		err = PTR_ERR(fence);
 		goto free_bb;
 	}
-	xe_bb_free(bb, fence);
+	timeout = dma_fence_wait_timeout(fence, false, HZ);
 	dma_fence_put(fence);
+	xe_bb_free(bb, NULL);
+
+	drm_dbg_driver(&stream->gt->tile->xe->drm, "xe_oa_modify_ctx_image() timeout=%ld\n", timeout);
+
+	if (timeout < 0)
+		return timeout;
+	else if (timeout == 0)
+		return -ETIME;
 
 	return 0;
 free_bb:
@@ -724,6 +733,7 @@ static int xe_oa_load_with_lri(struct xe_oa_stream *stream, struct xe_oa_reg *re
 	struct dma_fence *fence;
 	struct xe_bb *bb;
 	int err;
+	long timeout;
 
 	bb = xe_bb_new(stream->gt, 3, false);
 	if (IS_ERR(bb)) {
@@ -738,8 +748,17 @@ static int xe_oa_load_with_lri(struct xe_oa_stream *stream, struct xe_oa_reg *re
 		err = PTR_ERR(fence);
 		goto free_bb;
 	}
-	xe_bb_free(bb, fence);
+
+	timeout = dma_fence_wait_timeout(fence, false, HZ);
 	dma_fence_put(fence);
+	xe_bb_free(bb, NULL);
+
+	drm_dbg_driver(&stream->gt->tile->xe->drm, "xe_oa_load_with_lri() timeout=%ld HZ=%d\n", timeout, HZ);
+
+	if (timeout < 0)
+		return timeout;
+	else if (timeout == 0)
+		return -ETIME;
 
 	return 0;
 free_bb:
